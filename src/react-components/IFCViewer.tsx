@@ -1,188 +1,284 @@
 import * as React from "react"
 import * as OBC from "openbim-components"
 import { FragmentsGroup } from "bim-fragment"
+import * as THREE from "three";
 
 
-interface IViewerContext {
-  viewer: OBC.Components | null
-  setViewer: (viewer: OBC.Components | null) => void
-}
-
-export const ViewerContext = React.createContext<IViewerContext>({
-  viewer: null,
-  setViewer: () => {}
-})
-
-export function ViewerProvider(props: {children: React.ReactNode}) {
-  const [viewer, setViewer] = React.useState<OBC.Components | null>(null)
-  return (
-    <ViewerContext.Provider value={{ viewer, setViewer }}>
-      {props.children}
-    </ViewerContext.Provider>
-  )
-}
 
 export function IFCViewer() {
-  const { setViewer } = React.useContext(ViewerContext)
-  let viewer: OBC.Components
-  const createViewer = async () => {
-    viewer = new OBC.Components()
-    setViewer(viewer)
+  
+    
+    let components : OBC.Components;
+    const createViewer = async ()=>{
+        const container = document.getElementById("viewer-container") as HTMLDivElement;
+        components = new OBC.Components();
+        const sceneComponent = new OBC.SimpleScene(components);
+        sceneComponent.setup();
+        components.scene = sceneComponent;
+        const scene = sceneComponent.get();
 
-    const sceneComponent = new OBC.SimpleScene(viewer)
-    sceneComponent.setup()
-    viewer.scene = sceneComponent
-    const scene = sceneComponent.get()
-    scene.background = null
+        const renderer = new OBC.PostproductionRenderer(components, container);
+        //renderer.postproduction.customEffects.outlineEnabled = true;
+        components.renderer = renderer;
+        const cameraComponent = new OBC.OrthoPerspectiveCamera(components);
+        components.camera = cameraComponent;
+        const raycasterComponent = new OBC.SimpleRaycaster(components);
+        components.raycaster = raycasterComponent;
+       
+        components.init();
 
-    const viewerContainer = document.getElementById("viewer-container") as HTMLDivElement
-    const rendererComponent = new OBC.PostproductionRenderer(viewer, viewerContainer)
-    viewer.renderer = rendererComponent
+        cameraComponent.updateAspect();
+        renderer.postproduction.enabled = true;
+        let fragments = new OBC.FragmentManager(components);
 
-    const cameraComponent = new OBC.OrthoPerspectiveCamera(viewer)
-    viewer.camera = cameraComponent
+        const exportModelProperties = (model : FragmentsGroup, fileName: string = "fragmentProperties")=>{
+          const data =  JSON.stringify({...model.properties});
+          const blob = new Blob([data], {type:"application/json"});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${fileName}`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
 
-    const raycasterComponent = new OBC.SimpleRaycaster(viewer)
-    viewer.raycaster = raycasterComponent
+        const exportFragments = (model : FragmentsGroup)=>{
+          const binaryData = fragments.export(model);
+          const blob = new Blob([binaryData]);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${model.name.replace(".ifc","")}.frag`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        
+        
+        const camera = components.camera.get();
+        //camera.updateAspect();
+        if(camera instanceof OBC.OrthoPerspectiveCamera){
+            await components.camera.get().controls.setLookAt(10,10,1,0,0,0);
+        }
+        
+        const grid = new OBC.SimpleGrid(components);
 
-    viewer.init()
-    cameraComponent.updateAspect()
-    rendererComponent.postproduction.enabled = true
+        const boxMaterial = new THREE.MeshStandardMaterial({ color: '#6528D7' });
+        const boxGeometry = new THREE.BoxGeometry(3, 3, 3);
+        const cube = new THREE.Mesh(boxGeometry, boxMaterial);
+        cube.position.set(0, 1.5, 0);
+        scene.add(cube);
+        //scene.setup();
+        //components.init();
 
-    const fragmentManager = new OBC.FragmentManager(viewer)
-    function exportFragments(model: FragmentsGroup) {
-      const fragmentBinary = fragmentManager.export(model)
-      const blob = new Blob([fragmentBinary])
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${model.name.replace(".ifc", "")}.frag`
-      a.click()
-      URL.revokeObjectURL(url)
-    }
+        
 
-    const ifcLoader = new OBC.FragmentIfcLoader(viewer)
-    ifcLoader.settings.wasm = {
-      path: "https://unpkg.com/web-ifc@0.0.43/",
-      absolute: true
-    }
+        const fragmentIfcLoader = new OBC.FragmentIfcLoader(components);
+        fragmentIfcLoader.settings.wasm = {
+            path: "https://unpkg.com/web-ifc@0.0.44/",
+            absolute: true
+        }
+        fragmentIfcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
+        fragmentIfcLoader.settings.webIfc.OPTIMIZE_PROFILES = true;
 
-    const highlighter = new OBC.FragmentHighlighter(viewer)
-    highlighter.setup()
+        const highlighter = new OBC.FragmentHighlighter(components);
+        highlighter.setup();
 
-    const propertiesProcessor = new OBC.IfcPropertiesProcessor(viewer)
-    highlighter.events.select.onClear.add(() => {
-      propertiesProcessor.cleanPropertiesList()
-    })
+        const loadFragments = async ()=>{
+          if(fragments.groups.length) return;
+          // const file = await fetch('../../frag/HNS-CTL-MOD-EST-001 (2).frag');
+          // const data = await file.arrayBuffer();
+          // const buffer = new Uint8Array(data);
+          // const fragmntGroup = await fragments.load(buffer);
+          // console.log("model: ",fragmntGroup);
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".frag";
+          const reader = new FileReader();
+          reader.addEventListener("load", async ()=>{
+            const binary = reader.result;
+            if(!(binary instanceof ArrayBuffer)) return;
+            const fragmentBinary = new Uint8Array(binary);
+            await fragments.load(fragmentBinary);
+          });
+          input.addEventListener("change",()=>{
+            const filesList = input.files;
+            if(!filesList) return;
+            reader.readAsArrayBuffer(filesList[0]);
+          })
+          input.click();
+        }
 
-    const classifier = new OBC.FragmentClassifier(viewer)
-    const classificationWindow = new OBC.FloatingWindow(viewer)
-    classificationWindow.visible = false
-    viewer.ui.add(classificationWindow)
-    classificationWindow.title = "Model Groups"
-
-    const classificationsBtn = new OBC.Button(viewer)
-    classificationsBtn.materialIcon = "account_tree"
-
-    classificationsBtn.onClick.add(() => {
-      classificationWindow.visible = !classificationWindow.visible
-      classificationsBtn.active = classificationWindow.visible
-    })
-
-    async function createModelTree() {
-      const fragmentTree = new OBC.FragmentTree(viewer)
-      await fragmentTree.init()
-      await fragmentTree.update(["storeys", "entities"])
-      fragmentTree.onHovered.add((fragmentMap) => {
-        highlighter.highlightByID("hover", fragmentMap)
-      })
-      fragmentTree.onSelected.add((fragmentMap) => {
-        highlighter.highlightByID("select", fragmentMap)
-      })
-      const tree = fragmentTree.get().uiElement.get("tree")
-      return tree
-    }
-
-    const culler = new OBC.ScreenCuller(viewer)
-    cameraComponent.controls.addEventListener("sleep", () => {
-      culler.needsUpdate = true
-    })
-
-    async function onModelLoaded(model: FragmentsGroup) {
-      highlighter.update()
-      for (const fragment of model.items) {culler.add(fragment.mesh)}
-      culler.needsUpdate = true
-
-      try {
-        classifier.byStorey(model)
-        classifier.byEntity(model)
-        const tree = await createModelTree()
-        await classificationWindow.slots.content.dispose(true)
-        classificationWindow.addChild(tree)
-      
-        propertiesProcessor.process(model)
-        highlighter.events.select.onHighlight.add((fragmentMap) => {
-          const expressID = [...Object.values(fragmentMap)[0]][0]
-          propertiesProcessor.renderProperties(model, Number(expressID))
+        const loadFragmentProperties = async (model : FragmentsGroup)=>{
+          const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "application/json";
+        const reader = new FileReader();
+        var projects={};
+        reader.addEventListener("load",async ()=>{
+            const json = reader.result as string;
+            if(!json)return;
+            projects = JSON.parse(json);
+            //console.log("projects Object: ",projects);
+            model.properties = projects;
+            await onModelLoaded(model);
         })
-      } catch (error) {
-        alert(error)
-      }
+        input.addEventListener('change', () => {
+            const filesList = input.files
+            if (!filesList) { return }
+            reader.readAsText(filesList[0])
+        })
+        input.click();
+            
+        };
+
+        const classifier = new OBC.FragmentClassifier(components);
+        const classifierWindow = new OBC.FloatingWindow(components);
+        classifierWindow.visible = false;
+        components.ui.add(classifierWindow);
+        classifierWindow.title = "Model Group";
+
+
+        var classifierBtn = new OBC.Button(components);
+        classifierBtn.tooltip = "Model Group";
+        classifierBtn.materialIcon = "account_tree";
+        classifierBtn.onClick.add(()=>{
+          
+          classifierWindow.visible = !classifierWindow.visible;
+        })
+
+
+        const createModelTree = async ()=>{
+          const fragmentTree = new OBC.FragmentTree(components);
+          await fragmentTree.init();
+          fragmentTree.update([]);
+          await fragmentTree.update(["model","storeys", "entities"]);
+          const tree = fragmentTree.get().uiElement.get("tree");
+          await classifierWindow.slots.content.dispose(true);
+          fragmentTree.onHovered.add((fragmentMap)=>{
+            highlighter.highlightByID("hover", fragmentMap);
+          });
+          fragmentTree.onSelected.add((fragmentMap)=>{
+            highlighter.highlightByID("select", fragmentMap);
+          })
+          return tree;
+        }
+
+        const onModelLoaded = async (model : FragmentsGroup)=>{
+          highlighter.update();
+          classifier.byModel(model.ifcMetadata.name, model);
+          classifier.byStorey(model);
+          classifier.byEntity(model);
+          propertiesProcessor.process(model);
+          //console.log("classifier: ",classifier.get());
+          const tree = await createModelTree();
+          classifierWindow.addChild(tree);
+          highlighter.events.select.onHighlight.add(async (fragmentMap)=>{
+            var values = [...Object.values(fragmentMap)[0]][0];
+            //console.log("values: ",values);
+            propertiesProcessor.renderProperties(model, Number(values))
+          })
+        }
+
+
+        fragments.onFragmentsLoaded.add(async (model)=>{
+          loadFragmentProperties(model);
+          //console.log("propserties adter loading: ", model);
+        })
+
+        const propertiesProcessor = new OBC.IfcPropertiesProcessor(components);
+        highlighter.events.select.onClear.add(()=>{
+          propertiesProcessor.cleanPropertiesList();
+        })
+
+        fragmentIfcLoader.onIfcLoaded.add(async (model)=>{
+          exportFragments(model);
+          exportModelProperties(model, model.name.replace(".ifc",""));
+          onModelLoaded(model);
+          
+          
+        })
+
+        const loadButton = new OBC.Button(components);
+        loadButton.materialIcon = "download";
+        loadButton.tooltip = "Load fragment";
+
+        loadButton.onClick.add(()=> loadFragments());
+
+        const loadDataBtn = new OBC.Button(components);
+        loadDataBtn.tooltip = "Load IFC/Frag";
+        loadDataBtn.materialIcon = "publish"
+        loadDataBtn.addChild(
+          fragmentIfcLoader.uiElement.get("main"),
+          loadButton
+        )        
+
+          
+          
+          const highlighterMaterial = new THREE.MeshBasicMaterial({
+            color:"#BCF124",
+            depthTest:false,
+            opacity:0.8,
+            transparent: true,
+          });
+          highlighter.add("redSelection", highlighterMaterial);
+          highlighter.outlineMaterial.color.set(0xf0ff7a);
+          let lastSelection;
+          let singleSelection = {
+            value: true,
+          };
+
+          
+
+          // const highlightOnClick = async (event? : any)=>{
+          //   const result = await highlighter.highlight("redSelection",singleSelection.value);
+          //   console.log("result: ",result);
+          //   if(result){
+          //     lastSelection = {};
+          //     for(const fragment of result.fragments){
+          //       const fragmentID = fragment.id;
+          //       lastSelection[fragmentID] = [result.id];
+          //     }
+          //   }
+          // }
+
+        //   const highlightOnId = async ()=>{
+        //     const result = await highlighter.highlight('redSelection', singleSelection.value);
+        //     console.log("result: ",result);
+        //     if (result) {
+        //     lastSelection = {};
+        //     for (const fragment of result.fragments) {
+        //       let fragmentID = fragment.id;
+        //       lastSelection[fragmentID] = [result.id];
+        //     }
+        //     if(lastSelection !== undefined){
+        //       highlighter.highlightByID("redSelection",lastSelection)
+        //     }
+        //   }
+        // }
+        //container.addEventListener("click", ()=>highlightOnId())
+
+        const mainToolbar = new OBC.Toolbar(components, {name:"Main Toolbar", position:'bottom'});
+        mainToolbar.addChild(
+            //fragmentIfcLoader.uiElement.get("main"),
+            loadDataBtn,
+            fragments.uiElement.get("main"),
+            classifierBtn,
+            propertiesProcessor.uiElement.get("main"),
+            //loadButton,
+        )
+        components.ui.addToolbar(mainToolbar);
     }
-
-    ifcLoader.onIfcLoaded.add(async (model) => {
-      exportFragments(model)
-      onModelLoaded(model)
-    })
-
-    fragmentManager.onFragmentsLoaded.add((model) => {
-      model.properties = {} //Get this from a JSON file exported from the IFC first load!
-      onModelLoaded(model)
-    })
-
-    const importFragmentBtn = new OBC.Button(viewer)
-    importFragmentBtn.materialIcon = "upload"
-    importFragmentBtn.tooltip = "Load FRAG"
-
-    importFragmentBtn.onClick.add(() => {
-      const input = document.createElement('input')
-      input.type = 'file'
-      input.accept = '.frag'
-      const reader = new FileReader()
-      reader.addEventListener("load", async () => {
-        const binary = reader.result
-        if (!(binary instanceof ArrayBuffer)) { return }
-        const fragmentBinary = new Uint8Array(binary)
-        await fragmentManager.load(fragmentBinary)
-      })
-      input.addEventListener('change', () => {
-        const filesList = input.files
-        if (!filesList) { return }
-        reader.readAsArrayBuffer(filesList[0])
-      })
-      input.click()
-    })
 
     
 
-    const toolbar = new OBC.Toolbar(viewer)
-    toolbar.addChild(
-      ifcLoader.uiElement.get("main"),
-      importFragmentBtn,
-      classificationsBtn,
-      propertiesProcessor.uiElement.get("main"),
-      fragmentManager.uiElement.get("main")
-    )
-    viewer.ui.addToolbar(toolbar)
-  }
 
   React.useEffect(() => {
     createViewer()
     return () => {
-      viewer.dispose()
-      setViewer(null)
+      components.dispose()
     }
-  }, [])
+    }, [])
+
 
   return (
     <div

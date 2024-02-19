@@ -6,7 +6,7 @@ import { ProjectDetailsPage } from './react-components/ProjectsDetailsPage.tsx'
 
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  //<React.StrictMode>
     <ProjectDetailsPage />
-  </React.StrictMode>,
+  //</React.StrictMode>,
 )
