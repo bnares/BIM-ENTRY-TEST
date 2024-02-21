@@ -2,6 +2,7 @@ import * as React from "react"
 import * as OBC from "openbim-components"
 import { FragmentsGroup } from "bim-fragment"
 import * as THREE from "three";
+import { SimpleQTO } from "../bim-components/SimpleQTO";
 
 
 
@@ -163,8 +164,35 @@ export function IFCViewer() {
           return tree;
         }
 
+        const fragmentBoundingBox = new OBC.FragmentBoundingBox(components);
+        const zoomBtn = new OBC.Button(components);
+        zoomBtn.materialIcon = "zoom_in_map";
+        zoomBtn.tooltip = "Zoom to building";
+
+        const screenCuller = new OBC.ScreenCuller(components);
+        cameraComponent.controls.addEventListener("sleep",()=>{
+          screenCuller.needsUpdate = true;
+        })
+
         const onModelLoaded = async (model : FragmentsGroup)=>{
+          console.log("model: ",model);
+          for(const fragment of model.items){
+            screenCuller.add(fragment.mesh);
+          }
+          screenCuller.needsUpdate = true;
           highlighter.update();
+
+          fragmentBoundingBox.add(model);
+          const bbox = fragmentBoundingBox.getMesh();
+          fragmentBoundingBox.reset();
+          zoomBtn.onClick.add(()=>{
+            if(components.camera instanceof OBC.OrthoPerspectiveCamera){
+              const controls = components.camera.controls;
+              controls.fitToSphere(bbox, true);
+            }
+            
+          })
+
           classifier.byModel(model.ifcMetadata.name, model);
           classifier.byStorey(model);
           classifier.byEntity(model);
@@ -212,6 +240,8 @@ export function IFCViewer() {
           loadButton
         )        
 
+        const simpleQto = new SimpleQTO(components);
+        await simpleQto.setup();
           
           
           const highlighterMaterial = new THREE.MeshBasicMaterial({
@@ -256,6 +286,7 @@ export function IFCViewer() {
         //   }
         // }
         //container.addEventListener("click", ()=>highlightOnId())
+       
 
         const mainToolbar = new OBC.Toolbar(components, {name:"Main Toolbar", position:'bottom'});
         mainToolbar.addChild(
@@ -264,6 +295,8 @@ export function IFCViewer() {
             fragments.uiElement.get("main"),
             classifierBtn,
             propertiesProcessor.uiElement.get("main"),
+            zoomBtn,
+            simpleQto.uiElement.get("activationBtn"),
             //loadButton,
         )
         components.ui.addToolbar(mainToolbar);
