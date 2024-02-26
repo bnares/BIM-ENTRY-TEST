@@ -71,6 +71,8 @@ export function IFCViewer() {
         //scene.setup();
         //components.init();
 
+        const hider = new OBC.FragmentHider(components);
+        await hider.loadCached();
         
 
         const fragmentIfcLoader = new OBC.FragmentIfcLoader(components);
@@ -132,7 +134,12 @@ export function IFCViewer() {
             
         };
 
+        const exploder = new OBC.FragmentExploder(components);
+      
+
         const classifier = new OBC.FragmentClassifier(components);
+        
+        
         const classifierWindow = new OBC.FloatingWindow(components);
         classifierWindow.visible = false;
         components.ui.add(classifierWindow);
@@ -196,6 +203,9 @@ export function IFCViewer() {
           classifier.byModel(model.ifcMetadata.name, model);
           classifier.byStorey(model);
           classifier.byEntity(model);
+
+          await exploder.explode();
+          
           propertiesProcessor.process(model);
           //console.log("classifier: ",classifier.get());
           const tree = await createModelTree();
@@ -297,6 +307,8 @@ export function IFCViewer() {
             propertiesProcessor.uiElement.get("main"),
             zoomBtn,
             simpleQto.uiElement.get("activationBtn"),
+            hider.uiElement.get("main"),
+            exploder.uiElement.get("main"),
             //loadButton,
         )
         components.ui.addToolbar(mainToolbar);

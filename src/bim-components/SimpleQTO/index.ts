@@ -11,7 +11,7 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
     enabled: boolean = true;
     private _components: OBC.Components; 
     private _qtoResult : QtoResult = {};
-    private _qtoCardAdded :QTOCard[] = [];
+    private _qtoList: {[key: string]:any}[] = [];
     uiElement: OBC.UIElement<any> = new OBC.UIElement<{
         activationBtn: OBC.Button,
         qtoList : OBC.FloatingWindow
@@ -43,54 +43,89 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
     setup = async ()=>{
         const highlighter = await this._components.tools.get(OBC.FragmentHighlighter);
         highlighter.events.select.onHighlight.add(async (fragmentIdMap: OBC.FragmentIdMap)=>{
-            console.log("add element fragment: ",fragmentIdMap);
-            this.resetQuantities();
-            await this.resetWindow();
+            //console.log("add element fragment: ",fragmentIdMap);
+            //this.resetQuantities();
+            //await this.resetWindow();
             this.sumQuantities(fragmentIdMap);
         })
 
-        highlighter.events.select.onClear.add(()=>{
+        highlighter.events.select.onClear.add(async ()=>{
             this.resetQuantities();
-            this.resetWindow();
-            this._qtoCardAdded = [];
+            await this.resetWindow();
         })
     }
 
     resetQuantities = ()=>{
         this._qtoResult = {};
-        this._qtoCardAdded = [];
-       
     }
 
     resetWindow = async ()=>{
         const qtoList = this.uiElement.get("qtoList");
-        //console.log("qtoWindow: ",qtoList);
+        console.log("qtoWindow in resetWindow: ",qtoList);
         //console.log("children: ",qtoList.children[0].children);
         for(const childID in qtoList.children[0].children){
-            const qtoCard = qtoList.children[0].children[childID] as OBC.SimpleUIComponent;
+            const qtoCard = qtoList.children[0].children[childID] as QTOCard;
             //console.log("childId: ",childID);
-            //console.log("card: ", qtoCard);
-            await qtoCard.dispose();
-            qtoCard.removeFromParent();
+            //console.log("card from reset window: ", qtoCard);
+            if(qtoCard){
+                qtoCard.qtyValueList = [];
+                //qtoList.domElement.removeChild(qtoCard.domElement);
+                await qtoCard.dispose();
+                qtoCard.removeFromParent();
+            }
             
-           
 
         }
+        console.log("resetWidnow qtoList: ", qtoList);
+        
         qtoList.cleanData();
     }
 
     updateUI =()=>{
         const qtoList = this.uiElement.get("qtoList");
+        qtoList.cleanData();
+        //qtoList.dispose();
+        console.log("qtoResult in update START: ",this._qtoResult);
+        for(const setName in this._qtoResult){
+            this._qtoList = [];
+            
+            if(this._qtoResult.hasOwnProperty(setName)){
+                console.log("updateUI setName: ",setName);
+                const qtoCard = new QTOCard(this.components);
+                qtoCard.setName = setName;
+                const qtoValues = this._qtoResult[setName];
+                console.log("uopdateUI qtoValues: ",qtoValues);
+                for(const qtoName in qtoValues){
+                    if(qtoValues.hasOwnProperty(qtoName)){
+                        const qtoValue = qtoValues[qtoName];
+                        const item = {[qtoName]: qtoValue};
+                        this._qtoList.push(item);
+                        console.log("ADDED ITEM: ",item);
+                    }else{
+                        console.log("NO SUCH PROPERTY INSIDE!!!!!!!!!!!!!!!!!!!!!!!!!")
+                    }
+                }
+                 qtoCard.qtyValueList = this._qtoList;
+                 qtoList.addChild(qtoCard);
+                 //console.log("qtoList END: ",this._qtoList);   
+                
+            }else{
+                console.log("NO SUCH PROPERTYOUTSIDE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            }
+
+        }
         //if(this._qtoResult.hasOwnProperty())
+        this.resetQuantities();
     }
 
     sumQuantities = async (fragmentIdMap: OBC.FragmentIdMap) =>{
         //this.resetWindow();
-        this.resetQuantities()
+        //console.log("begining of sumQuantities result: ",this._qtoResult);
+        this.resetQuantities();
         const fragmentManager = await this._components.tools.get(OBC.FragmentManager);
         for(const fragmentID in fragmentIdMap){
             const fragment = fragmentManager.list[fragmentID];
-            console.log(fragment);
+            //console.log("one of selected fragments: ",fragment);
            const model = fragment.mesh.parent;
            if(!(model instanceof FragmentsGroup) && model.properties) continue;
            const properties = model.properties;
@@ -98,7 +133,7 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
                 properties, 
                 WEBIFC.IFCRELDEFINESBYPROPERTIES,
                 (setID, relatedIDs)=>{
-                    const uiDataElem = new QTOCard(this._components);
+                    //const uiDataElem = new QTOCard(this._components);
                     const set = properties[setID];
                     const expressIDs = fragmentIdMap[fragmentID];
                     const workingIDs = relatedIDs.filter(id=>expressIDs.has(id.toString()));
@@ -106,9 +141,10 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
                     
                     if(set.type !== WEBIFC.IFCELEMENTQUANTITY || workingIDs.length==0 || !setName) return;
                     if(!(setName in this._qtoResult)) this._qtoResult[setName] = {};
-                    console.log("set: ",set);
-                    uiDataElem.qtoCardTitle = setName.toString();
-                    console.log(properties[setID])
+                    //console.log("set: ",set);
+                    //uiDataElem.setName = setName.toString();
+                    //console.log(properties[setID]);
+                    //console.log("first qtoResult: ",this._qtoResult);
                     
                     OBC.IfcPropertiesUtils.getQsetQuantities(
                         properties,
@@ -120,20 +156,23 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
                             if(!(qtoName in this._qtoResult[setName])) this._qtoResult[setName][qtoName] = 0;
                             this._qtoResult[setName][qtoName] += value;
                            
-                            uiDataElem.qtoName = qtoName;
-                            uiDataElem.qtoValue = this._qtoResult[setName][qtoName].toString();
-                            const floatWindow = this.uiElement.get("qtoList");
-                            floatWindow.addChild(uiDataElem);
-                            this._qtoCardAdded.push(uiDataElem);
+                            //uiDataElem.qtoName = qtoName;
+                            //uiDataElem.qtoValue = this._qtoResult[setName][qtoName].toString();
+                            //const floatWindow = this.uiElement.get("qtoList");
+                            //floatWindow.addChild(uiDataElem);
+                            //console.log("second qtoResukt: ",this._qtoResult);
 
                         }
                     )
 
                 }
             )
-            console.log(this._qtoResult);
+            
             
         }
+        console.log("_qtoResult in sumQuantities: ",this._qtoResult);
+        this.resetWindow();
+        this.updateUI();
     }
 
     get(): QtoResult {
