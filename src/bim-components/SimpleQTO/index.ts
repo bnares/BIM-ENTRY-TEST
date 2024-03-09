@@ -121,12 +121,14 @@ export class SimpleQTO extends OBC.Component<QtoResult> implements OBC.UI, OBC.D
     sumQuantities = async (fragmentIdMap: OBC.FragmentIdMap) =>{
         //this.resetWindow();
         //console.log("begining of sumQuantities result: ",this._qtoResult);
+        console.log("sumQuantities fragmentIdMap: ",fragmentIdMap)
         this.resetQuantities();
         const fragmentManager = await this._components.tools.get(OBC.FragmentManager);
         for(const fragmentID in fragmentIdMap){
             const fragment = fragmentManager.list[fragmentID];
-            //console.log("one of selected fragments: ",fragment);
+            console.log("one of selected fragments: ",fragment);
            const model = fragment.mesh.parent;
+           console.log("model sumQuantities: ",model);
            if(!(model instanceof FragmentsGroup) && model.properties) continue;
            const properties = model.properties;
             OBC.IfcPropertiesUtils.getRelationMap(

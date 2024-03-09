@@ -3,6 +3,7 @@ import * as OBC from "openbim-components"
 import { FragmentsGroup } from "bim-fragment"
 import * as THREE from "three";
 import { SimpleQTO } from "../bim-components/SimpleQTO";
+import { PlanView } from "openbim-components/fragments/FragmentPlans/src/types";
 
 
 
@@ -83,7 +84,17 @@ export function IFCViewer() {
         fragmentIfcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
         fragmentIfcLoader.settings.webIfc.OPTIMIZE_PROFILES = true;
 
+        const highlightFloorPlanMat = new THREE.MeshBasicMaterial({
+          depthTest: false,
+          color: 0xBCF124,
+          transparent: true,
+          opacity: 0.3
+        });
         const highlighter = new OBC.FragmentHighlighter(components);
+        highlighter.add("default", highlightFloorPlanMat);
+        const canvas = renderer.get().domElement;
+        canvas.addEventListener("click",()=>highlighter.clear("default"));
+        console.log("CANVAS: ",canvas);
         highlighter.setup();
 
         const loadFragments = async ()=>{
@@ -179,10 +190,84 @@ export function IFCViewer() {
         const screenCuller = new OBC.ScreenCuller(components);
         cameraComponent.controls.addEventListener("sleep",()=>{
           screenCuller.needsUpdate = true;
+        });
+
+        container.addEventListener("mouseup", ()=>screenCuller.needsUpdate = true);
+        container.addEventListener("wheel", ()=>screenCuller.needsUpdate = true);
+
+        const clipper = new OBC.EdgesClipper(components);
+        const sectionMaterial = new THREE.LineBasicMaterial({color:'black'});
+        const fillMaterial = new THREE.MeshBasicMaterial({color:'gray', side:2});
+        const fillOutline = new THREE.MeshBasicMaterial({color:'black', side:1, opacity:0.5, transparent: true});
+        const newStyleFilled =  clipper.styles.create("filled", new Set(), sectionMaterial,fillMaterial, fillOutline);
+      
+        const newStyleProjected =  clipper.styles.create("projected", new Set(), sectionMaterial);
+        const styles = clipper.get();
+
+        const whiteColor = new THREE.Color("white");
+        const whiteMaterial = new THREE.MeshBasicMaterial({color: whiteColor});
+        const materialManager = new OBC.MaterialManager(components);
+        materialManager.addMaterial("white", whiteMaterial);
+        
+        const floorPlans = new OBC.FragmentPlans(components);
+        floorPlans.commands={
+          "Select": async (plan)=>{
+            if((plan)){
+              const found = await classifier.find({storeys:[plan?.name]});
+              console.log("FloorPlan select found: ",found);
+              highlighter.highlightByID("default", found);
+            }},
+            "Show": async (plan)=>{
+              if(plan){
+                const found = await classifier.find({storeys:[plan.name]});
+                console.log("FloorPlan SHOW found: ",found);
+                hider.set(true, found);
+              }
+            },
+            "Hide": async (plan)=>{
+              if(plan){
+                const found = await classifier.find({storeys:[plan.name]});
+                console.log("FloorPlan Hide found: ",found);
+                hider.set(false, found);
+              }
+            }
+          }
+          
+        floorPlans.onNavigated.add(()=>{
+          renderer.postproduction.customEffects.glossEnabled = false;
+          materialManager.setBackgroundColor(whiteColor);
+          materialManager.set(true,["white"]);
+          grid.visible = false;
+        });
+
+        floorPlans.onExited.add(()=>{
+          renderer.postproduction.customEffects.glossEnabled = true;
+          materialManager.resetBackgroundColor();
+          materialManager.set(false, ["white"]);
+          grid.visible = true;
+        })
+
+        const dimensions = new OBC.LengthMeasurement(components);
+        //dimensions.enabled = true;
+        dimensions.snapDistance =1;
+        container.ondblclick = ()=>dimensions.create();
+        window.onkeydown = (event)=>{
+          console.log("key down event: ", event);
+          if(event.code ==='Delete' || event.code==="Backspace"){
+            dimensions.deleteAll();
+          }
+        }
+
+        dimensions.uiElement.get("main").get().addEventListener("click",()=>{
+          dimensions.enabled = !dimensions.enabled;
+          if(dimensions.enabled == false){
+            dimensions.delete();
+          }
         })
 
         const onModelLoaded = async (model : FragmentsGroup)=>{
           console.log("model: ",model);
+          
           for(const fragment of model.items){
             screenCuller.add(fragment.mesh);
           }
@@ -204,7 +289,28 @@ export function IFCViewer() {
           classifier.byStorey(model);
           classifier.byEntity(model);
 
-          await exploder.explode();
+          //await exploder.explode();
+
+          const found = await classifier.find({entities:["IFCWALLSTANDARDCASE", "IFCWALL", "IFCBEAM", "IFCCOLUMN"]});
+          console.log("Styles before: ",styles);
+          for(const fragID in found){
+            const {mesh} = fragments.list[fragID];
+            newStyleFilled.fragments[fragID] = new Set(found[fragID]);
+            //styles.filled.fragments[fragID] = new Set(found[fragID]);
+            newStyleFilled.meshes.add(mesh);
+            //styles.filled.meshes.add(mesh);
+          }
+          const meshes = [];
+          for(const fragment of model.items){
+            const {mesh} = fragment;
+            meshes.push(mesh);
+            newStyleProjected.meshes.add(mesh);
+            //styles.projected.meshes.add(mesh);
+          }
+          materialManager.addMeshes("white", meshes);
+          await floorPlans.computeAllPlanViews(model);
+          await floorPlans.updatePlansList();
+          console.log("ADDED MESHES: ",styles);
           
           propertiesProcessor.process(model);
           //console.log("classifier: ",classifier.get());
@@ -217,9 +323,12 @@ export function IFCViewer() {
           })
         }
 
+        
 
         fragments.onFragmentsLoaded.add(async (model)=>{
           loadFragmentProperties(model);
+          renderer.postproduction.customEffects.outlineEnabled = true;
+          //await floorPlans.updatePlansList();
           //console.log("propserties adter loading: ", model);
         })
 
@@ -296,6 +405,11 @@ export function IFCViewer() {
         //   }
         // }
         //container.addEventListener("click", ()=>highlightOnId())
+
+        var ifcExploderBtn = exploder.uiElement.get("main");
+        ifcExploderBtn.get().addEventListener("click",async ()=>{
+          await exploder.explode();
+        })
        
 
         const mainToolbar = new OBC.Toolbar(components, {name:"Main Toolbar", position:'bottom'});
@@ -309,6 +423,8 @@ export function IFCViewer() {
             simpleQto.uiElement.get("activationBtn"),
             hider.uiElement.get("main"),
             exploder.uiElement.get("main"),
+            floorPlans.uiElement.get("main"),
+            dimensions.uiElement.get("main"),
             //loadButton,
         )
         components.ui.addToolbar(mainToolbar);
